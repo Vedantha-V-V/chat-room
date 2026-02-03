@@ -9,7 +9,7 @@ Anonymous chat application for Klymo Ascent – built around **privacy**, **ephe
 
 - **2. Take selfie (camera only) → AI verifies gender → Delete image**
   - React camera component (`react-webcam`) with **camera-only** capture (no file uploads).
-  - Selfie sent to a separate **Flask ML service** for gender classification.
+  - Selfie sent to a separate **Gemini** for gender classification.
   - Flask processes the image **in-memory only** and immediately discards it.
   - Backend stores only: `device_id`, `gender`, `verified_at`.
 
