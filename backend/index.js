@@ -1,6 +1,7 @@
 import express from 'express';
 import * as dotenv from 'dotenv';
 import cors from 'cors';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 import connectDB from './db/connect.js';
 import { apiRateLimiter, queueRateLimiter } from './middleware/rateLimiter.js';
@@ -18,7 +19,17 @@ dotenv.config();
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '10mb' }));
+
+// --- Gemini setup (placeholder API key) ---
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'YOUR_GEMINI_API_KEY_HERE';
+let geminiModel = null;
+
+if (GEMINI_API_KEY && GEMINI_API_KEY !== 'YOUR_GEMINI_API_KEY_HERE') {
+  const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+  // Vision-capable model – adjust if you prefer another version
+  geminiModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+}
 
 // Health/root endpoint
 app.get('/', async (req, res) => {
@@ -91,8 +102,9 @@ app.post(
 );
 
 /**
- * Verification result endpoint
- * - Called by frontend AFTER Flask service classifies the selfie
+ * Gender verification endpoint (Gemini)
+ * - Receives base64 image from frontend
+ * - Sends image to Gemini for classification
  * - Stores only gender + verified_at on the device record
  * - Never stores the image itself
  */
@@ -103,12 +115,61 @@ app.post(
   checkBanStatus,
   async (req, res) => {
     try {
-      const { gender, confidence } = req.body || {};
+      if (!geminiModel) {
+        return res.status(500).json({
+          success: false,
+          error: 'Gemini API is not configured. Please set GEMINI_API_KEY.',
+        });
+      }
 
-      if (!gender) {
+      const { image } = req.body || {};
+
+      if (!image) {
         return res.status(400).json({
           success: false,
-          error: 'Gender is required',
+          error: 'Image is required',
+        });
+      }
+
+      // Expect image as data URL or raw base64 – strip prefix if present
+      let base64Data = image;
+      if (typeof base64Data === 'string' && base64Data.includes(',')) {
+        base64Data = base64Data.split(',')[1];
+      }
+
+      // Decode base64 to bytes (in memory only)
+      const imageBytes = Buffer.from(base64Data, 'base64');
+
+      // Build Gemini prompt – ask for a strict male/female classification
+      const prompt =
+        'You are a strict gender classifier for a selfie image. ' +
+        'Return ONLY a single word: \"male\" or \"female\" based on the presented face. ' +
+        'If you are unsure or the face is not visible, return \"unknown\". ' +
+        'Do not include any explanation.';
+
+      const result = await geminiModel.generateContent([
+        { text: prompt },
+        {
+          inlineData: {
+            data: imageBytes.toString('base64'),
+            mimeType: 'image/jpeg',
+          },
+        },
+      ]);
+
+      const text = result.response.text().trim().toLowerCase();
+
+      let gender = 'unknown';
+      if (text.includes('male') && !text.includes('female')) {
+        gender = 'male';
+      } else if (text.includes('female') && !text.includes('male')) {
+        gender = 'female';
+      }
+
+      if (gender === 'unknown') {
+        return res.status(422).json({
+          success: false,
+          error: 'Unable to confidently determine gender from image.',
         });
       }
 
@@ -117,14 +178,20 @@ app.post(
       req.device.verified_at = new Date();
       await req.device.save();
 
+      // Explicitly clear image bytes from memory (will then be GC’d)
+      // eslint-disable-next-line no-unused-vars
+      base64Data = null;
+      // eslint-disable-next-line no-unused-vars
+      // @ts-ignore
+      imageBytes.fill(0);
+
       res.json({
         success: true,
         gender,
-        confidence,
       });
     } catch (error) {
       console.error('Verify gender error:', error);
-      res.status(500).json({ error: 'Failed to save verification result' });
+      res.status(500).json({ error: 'Failed to verify gender' });
     }
   },
 );

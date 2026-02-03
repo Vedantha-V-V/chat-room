@@ -5,12 +5,6 @@ const api = axios.create({
   baseURL: import.meta.env.REACT_APP_API_URL,
 });
 
-// Flask ML service API client
-const mlApi = axios.create({
-  baseURL: 'http://localhost:5000',
-  timeout: 10000, // 10 second timeout for image processing
-});
-
 export const fetchData = async () => {
   try {
     const response = await api.get('/data');
@@ -22,33 +16,26 @@ export const fetchData = async () => {
 };
 
 /**
- * Verify gender from camera-captured image
+ * Verify gender from camera-captured image using backend (Gemini)
  * 
- * Privacy-first: Image is sent as base64, processed, and immediately discarded
- * Only the classification result is returned
+ * Privacy-first: Image is sent as base64 to backend, forwarded to Gemini,
+ * processed in memory only, and immediately discarded. Only the
+ * classification result (gender) is stored on the device record.
  * 
  * @param {string} imageBase64 - Base64 encoded image from webcam
- * @returns {Promise<{success: boolean, gender?: string, confidence?: number, error?: string}>}
+ * @returns {Promise<{success: boolean, gender?: string, error?: string}>}
  */
 export const verifyGender = async (imageBase64) => {
   try {
-    // Include device ID in request for rate limiting
-    const deviceId = await getOrCreateDeviceId();
-    
-    const response = await mlApi.post('/classify', {
+    // Device ID header is already added by interceptor – we just call backend
+    const response = await api.post('/api/verify-gender', {
       image: imageBase64,
-    }, {
-      headers: {
-        'X-Device-ID': deviceId,
-        'Content-Type': 'application/json',
-      },
     });
 
     return response.data;
   } catch (error) {
     console.error('Gender verification error:', error);
-    
-    // Return error in consistent format
+
     return {
       success: false,
       error: error.response?.data?.error || error.message || 'Failed to verify gender',
