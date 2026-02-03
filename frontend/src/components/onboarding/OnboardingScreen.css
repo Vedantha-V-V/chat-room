@@ -1,0 +1,27 @@
+.onboarding-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--matrix-black);
+}
+
+.onboarding-card {
+  max-width: 600px;
+  width: 100%;
+  text-align: center;
+}
+
+.onboarding-card h1 {
+  font-size: 2rem;
+  margin-bottom: 24px;
+  letter-spacing: 3px;
+}
+
+.onboarding-card h2 {
+  font-size: 1.5rem;
+  margin-bottom: 24px;
+  letter-spacing: 2px;
+}
+

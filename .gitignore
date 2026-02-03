@@ -25,3 +25,6 @@ dist-ssr
 
 
 .env
+.cursorrules
+.venv
+UI_GUIDE.md
