@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useDeviceId } from '../../hooks/useDeviceId';
+import { updateProfile } from '../../api';
 import CameraVerification from './CameraVerification';
 import './OnboardingScreen.css';
 
@@ -9,8 +10,12 @@ import './OnboardingScreen.css';
  */
 const OnboardingScreen = ({ onComplete }) => {
   const { deviceId, loading, error } = useDeviceId();
-  const [step, setStep] = useState(1); // 1: Device ID, 2: Verification, 3: Complete
+  const [step, setStep] = useState(1); // 1: Profile, 2: Verification, 3: Complete
   const [verificationResult, setVerificationResult] = useState(null);
+  const [nickname, setNickname] = useState('');
+  const [bio, setBio] = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileError, setProfileError] = useState(null);
 
   const handleVerificationComplete = (result) => {
     setVerificationResult(result);
@@ -23,8 +28,33 @@ const OnboardingScreen = ({ onComplete }) => {
           deviceId,
           gender: result.gender,
           confidence: result.confidence,
+          nickname,
+          bio,
         });
       }, 2000);
+    }
+  };
+
+  const handleSaveProfileAndContinue = async () => {
+    if (!nickname.trim()) {
+      setProfileError('Please choose a nickname.');
+      return;
+    }
+
+    setProfileError(null);
+    setSavingProfile(true);
+    try {
+      await updateProfile({
+        nickname: nickname.trim(),
+        bio: bio.trim(),
+      });
+      setStep(2);
+    } catch (e) {
+      setProfileError(
+        e.response?.data?.error || e.message || 'Failed to save profile. Please try again.',
+      );
+    } finally {
+      setSavingProfile(false);
     }
   };
 
@@ -77,12 +107,50 @@ const OnboardingScreen = ({ onComplete }) => {
               <br />
               No personal data collected. Ephemeral conversations.
             </p>
-            <button
-              className="matrix-btn matrix-btn-primary"
-              onClick={() => setStep(2)}
-            >
-              PROCEED TO VERIFICATION
-            </button>
+
+            <div className="onboarding-profile-form">
+              <label className="onboarding-label">
+                NICKNAME (PSEUDONYM)
+                <input
+                  type="text"
+                  className="matrix-input onboarding-input"
+                  maxLength={32}
+                  placeholder="e.g. NeonFox, CryptoOwl"
+                  value={nickname}
+                  onChange={(e) => setNickname(e.target.value)}
+                />
+              </label>
+
+              <label className="onboarding-label mt-2">
+                SHORT BIO (1–2 LINES)
+                <textarea
+                  className="matrix-input onboarding-textarea"
+                  maxLength={140}
+                  rows={2}
+                  placeholder="e.g. Night owl, here for deep conversations."
+                  value={bio}
+                  onChange={(e) => setBio(e.target.value)}
+                />
+              </label>
+
+              <p className="onboarding-hint">
+                Use only pseudonyms. No real names, emails, socials, or contact info.
+              </p>
+
+              {profileError && (
+                <div className="matrix-status-error mt-1" style={{ fontSize: '12px' }}>
+                  {profileError}
+                </div>
+              )}
+
+              <button
+                className="matrix-btn matrix-btn-primary mt-2"
+                onClick={handleSaveProfileAndContinue}
+                disabled={savingProfile}
+              >
+                {savingProfile ? 'SAVING...' : 'SAVE & PROCEED TO VERIFICATION'}
+              </button>
+            </div>
           </div>
         </div>
       </div>

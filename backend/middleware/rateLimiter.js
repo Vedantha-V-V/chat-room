@@ -1,4 +1,4 @@
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import Device from '../models/Device.js';
 
 /**
@@ -23,67 +23,119 @@ setInterval(() => {
 }, 5 * 60 * 1000); // Clean up every 5 minutes
 
 /**
- * Custom rate limit store that uses device ID
- * Tracks requests per device rather than per IP
+ * Factory function to create a rate limit store instance
+ * Each rate limiter gets its own store to avoid sharing issues
  */
-const deviceRateLimitStore = {
-  /**
-   * Increment request count for a device
-   */
-  increment: (key, cb) => {
-    const now = Date.now();
-    const windowMs = 60 * 1000; // 1 minute window
-    
-    if (!requestCounts.has(key)) {
-      requestCounts.set(key, {
-        count: 1,
-        resetTime: now + windowMs,
-      });
-      return cb(null, { totalHits: 1, resetTime: new Date(now + windowMs) });
-    }
+const createRateLimitStore = () => {
+  return {
+    /**
+     * Increment request count for a device
+     */
+    increment: (key, cb) => {
+      try {
+        const now = Date.now();
+        const windowMs = 60 * 1000; // 1 minute window
+        
+        if (!requestCounts.has(key)) {
+          requestCounts.set(key, {
+            count: 1,
+            resetTime: now + windowMs,
+          });
+          const result = { totalHits: 1, resetTime: new Date(now + windowMs) };
+          if (typeof cb === 'function') {
+            return cb(null, result);
+          }
+          return result;
+        }
 
-    const record = requestCounts.get(key);
-    
-    // Reset if window has passed
-    if (now > record.resetTime) {
-      record.count = 1;
-      record.resetTime = now + windowMs;
-    } else {
-      record.count += 1;
-    }
+        const record = requestCounts.get(key);
+        
+        // Reset if window has passed
+        if (now > record.resetTime) {
+          record.count = 1;
+          record.resetTime = now + windowMs;
+        } else {
+          record.count += 1;
+        }
 
-    return cb(null, {
-      totalHits: record.count,
-      resetTime: new Date(record.resetTime),
-    });
-  },
-
-  /**
-   * Decrement request count (not used but required by interface)
-   */
-  decrement: (key) => {
-    if (requestCounts.has(key)) {
-      const record = requestCounts.get(key);
-      if (record.count > 0) {
-        record.count -= 1;
+        const result = {
+          totalHits: record.count,
+          resetTime: new Date(record.resetTime),
+        };
+        
+        if (typeof cb === 'function') {
+          return cb(null, result);
+        }
+        return result;
+      } catch (error) {
+        if (typeof cb === 'function') {
+          return cb(error);
+        }
+        throw error;
       }
-    }
-  },
+    },
 
-  /**
-   * Reset request count for a device
-   */
-  resetKey: (key) => {
-    requestCounts.delete(key);
-  },
+    /**
+     * Decrement request count (not used but required by interface)
+     */
+    decrement: (key, cb) => {
+      try {
+        if (requestCounts.has(key)) {
+          const record = requestCounts.get(key);
+          if (record.count > 0) {
+            record.count -= 1;
+          }
+        }
+        if (typeof cb === 'function') {
+          cb(null);
+        }
+      } catch (error) {
+        if (typeof cb === 'function') {
+          cb(error);
+        }
+      }
+    },
 
-  /**
-   * Shutdown (not used but required by interface)
-   */
-  shutdown: () => {
-    requestCounts.clear();
-  },
+    /**
+     * Reset request count for a device
+     */
+    resetKey: (key, cb) => {
+      try {
+        requestCounts.delete(key);
+        if (typeof cb === 'function') {
+          cb(null);
+        }
+      } catch (error) {
+        if (typeof cb === 'function') {
+          cb(error);
+        }
+      }
+    },
+
+    /**
+     * Shutdown (not used but required by interface)
+     */
+    shutdown: (cb) => {
+      try {
+        requestCounts.clear();
+        if (typeof cb === 'function') {
+          cb(null);
+        }
+      } catch (error) {
+        if (typeof cb === 'function') {
+          cb(error);
+        }
+      }
+    },
+  };
 };
+
+/**
+ * Create separate store instances for each rate limiter
+ */
+const apiLimiterStore = createRateLimitStore();
+const strictLimiterStore = createRateLimitStore();
+const queueLimiterStore = createRateLimitStore();
 
 /**
  * General API rate limiter
@@ -93,25 +145,28 @@ const deviceRateLimitStore = {
 export const apiRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 10, // 10 requests per minute
-  message: {
-    error: 'Too many requests',
-    message: 'Rate limit exceeded. Please try again later.',
-    limit: 10,
-    window: '1 minute',
-  },
-  standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
-  legacyHeaders: false, // Disable `X-RateLimit-*` headers
-  // Use device ID as the key instead of IP address
+  // message: {
+  //   error: 'Too many requests',
+  //   message: 'Rate limit exceeded. Please try again later.',
+  //   limit: 10,
+  //   window: '1 minute',
+  // },
+  // standardHeaders: true,
+  // legacyHeaders: false, 
   keyGenerator: (req) => {
-    return req.headers['x-device-id'] || req.ip || 'unknown';
+    const deviceId = req.headers['x-device-id'];
+    if (deviceId) {
+      return deviceId;
+    }
+    // Use ipKeyGenerator helper for proper IPv6 support
+    return ipKeyGenerator(req);
   },
-  // Custom store for device-based rate limiting
-  store: deviceRateLimitStore,
-  // Skip rate limiting for successful requests (optional)
-  skip: (req) => {
-    // You can add custom logic here to skip rate limiting for certain conditions
-    return false;
-  },
+  
+  store: apiLimiterStore,
+  
+  // skip: (req) => {
+  //   return false;
+  // },
 });
 
 /**
@@ -131,9 +186,14 @@ export const strictRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => {
-    return req.headers['x-device-id'] || req.ip || 'unknown';
+    const deviceId = req.headers['x-device-id'];
+    if (deviceId) {
+      return deviceId;
+    }
+    // Use ipKeyGenerator helper for proper IPv6 support
+    return ipKeyGenerator(req);
   },
-  store: deviceRateLimitStore,
+  store: strictLimiterStore,
 });
 
 /**
@@ -153,9 +213,14 @@ export const queueRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => {
-    return req.headers['x-device-id'] || req.ip || 'unknown';
+    const deviceId = req.headers['x-device-id'];
+    if (deviceId) {
+      return deviceId;
+    }
+    // Use ipKeyGenerator helper for proper IPv6 support
+    return ipKeyGenerator(req);
   },
-  store: deviceRateLimitStore,
+  store: queueLimiterStore,
 });
 
 /**

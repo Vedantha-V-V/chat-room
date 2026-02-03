@@ -6,7 +6,7 @@ import './QueueScreen.css';
  * Queue Screen - Join queue with gender filter
  * Matrix-themed queue interface
  */
-const QueueScreen = ({ onMatchFound, userGender }) => {
+const QueueScreen = ({ onMatchFound, userGender, userNickname, userBio }) => {
   const { deviceId } = useDeviceId();
   const [filter, setFilter] = useState('any');
   const [isInQueue, setIsInQueue] = useState(false);
@@ -71,7 +71,23 @@ const QueueScreen = ({ onMatchFound, userGender }) => {
         
         <div className="matrix-terminal mt-3">
           <div>DEVICE_ID: {deviceId}</div>
-          <div className="mt-1">GENDER: <span className="matrix-glow-subtle">{userGender?.toUpperCase() || 'UNKNOWN'}</span></div>
+          <div className="mt-1">
+            NICKNAME:{' '}
+            <span className="matrix-glow-subtle">
+              {userNickname || 'ANON'}
+            </span>
+          </div>
+          <div className="mt-1">
+            GENDER:{' '}
+            <span className="matrix-glow-subtle">
+              {userGender?.toUpperCase() || 'UNKNOWN'}
+            </span>
+          </div>
+          {userBio && (
+            <div className="mt-1" style={{ color: 'var(--matrix-text-dim)', fontSize: '12px' }}>
+              BIO: {userBio}
+            </div>
+          )}
           {/* <div className="mt-2">
             DAILY_MATCHES:
             <div className="mt-1" style={{ paddingLeft: '16px', color: 'var(--matrix-text-dim)' }}>

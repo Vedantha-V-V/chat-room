@@ -2,7 +2,7 @@ import axios from 'axios';
 import { getOrCreateDeviceId } from './utils/deviceFingerprint';
 
 const api = axios.create({
-  baseURL: import.meta.env.REACT_APP_API_URL,
+  baseURL: 'http://localhost:8000',
 });
 
 export const fetchData = async () => {
@@ -40,6 +40,22 @@ export const verifyGender = async (imageBase64) => {
       success: false,
       error: error.response?.data?.error || error.message || 'Failed to verify gender',
     };
+  }
+};
+
+/**
+ * Update pseudonymous profile (nickname + short bio)
+ */
+export const updateProfile = async ({ nickname, bio }) => {
+  try {
+    const response = await api.post('/api/profile', {
+      nickname,
+      bio,
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Update profile error:', error);
+    throw error;
   }
 };
 

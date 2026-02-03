@@ -1,10 +1,24 @@
-import mongoose from 'mongoose'
+import mongoose from 'mongoose';
+import { MongoMemoryServer } from 'mongodb-memory-server';
 
-const connectDB = (url)=>{
-    mongoose.set('strictQuery',true)
-    mongoose.connect(url)
-    .then(()=>console.log('MongoDB Connected'))
-    .catch((err)=> console.log(err))
-}
+let mongod;
 
-export default connectDB
+const connectDB = async () => {
+  try {
+    mongod = await MongoMemoryServer.create();
+    const uri = mongod.getUri();
+    await mongoose.connect(uri);
+    console.log("Connected to in-memory MongoDB");
+  } catch (err) {
+    console.error("Connection failed:", err.message);
+    process.exit(1);
+  }
+};
+
+const disconnectDB = async () => {
+  await mongoose.disconnect();
+  if (mongod) await mongod.stop();
+  console.log("Disconnected & memory server stopped");
+};
+
+export { connectDB, disconnectDB };

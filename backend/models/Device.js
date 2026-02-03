@@ -12,11 +12,28 @@ const DeviceSchema = new mongoose.Schema({
     unique: true,
     index: true,
   },
+  // Pseudonymous profile (no real identity)
+  nickname: {
+    type: String,
+    maxlength: 32,
+    default: null,
+  },
+  bio: {
+    type: String,
+    maxlength: 140,
+    default: null,
+  },
   // Gender classification result (from verification)
   gender: {
     type: String,
-    enum: ['male', 'female'],
     default: null,
+    validate: {
+      validator: function(value) {
+        // Allow null for unverified devices, otherwise must be valid gender
+        return value === null || ['male', 'female'].includes(value);
+      },
+      message: 'Gender must be either "male" or "female"',
+    },
   },
   // When gender was verified
   verified_at: {

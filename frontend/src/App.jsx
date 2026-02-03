@@ -37,6 +37,8 @@ function App() {
       deviceId: data.deviceId,
       gender: data.gender,
       verifiedAt: new Date().toISOString(),
+      nickname: data.nickname,
+      bio: data.bio,
     };
     localStorage.setItem('anonymous_chat_user', JSON.stringify(userDataToSave));
     setUserData(userDataToSave);
@@ -65,6 +67,8 @@ function App() {
         <QueueScreen
           onMatchFound={handleMatchFound}
           userGender={userData.gender}
+          userNickname={userData.nickname}
+          userBio={userData.bio}
         />
       )}
 

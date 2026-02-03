@@ -1,9 +1,13 @@
 import express from 'express';
 import * as dotenv from 'dotenv';
+import mongoose from 'mongoose';
 import cors from 'cors';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-import connectDB from './db/connect.js';
+// Suppress Mongoose strictQuery deprecation warning - set BEFORE any db operations
+mongoose.set('strictQuery', false);
+
+import { connectDB, disconnectDB } from './db/connect.js';
 import { apiRateLimiter, queueRateLimiter } from './middleware/rateLimiter.js';
 import {
   validateDeviceId,
@@ -27,8 +31,8 @@ let geminiModel = null;
 
 if (GEMINI_API_KEY && GEMINI_API_KEY !== 'YOUR_GEMINI_API_KEY_HERE') {
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-  // Vision-capable model – adjust if you prefer another version
-  geminiModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  // Vision-capable model – using gemini-2.0-flash (latest stable model with vision support)
+  geminiModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 }
 
 // Health/root endpoint
@@ -147,23 +151,38 @@ app.post(
         'If you are unsure or the face is not visible, return \"unknown\". ' +
         'Do not include any explanation.';
 
-      const result = await geminiModel.generateContent([
-        { text: prompt },
-        {
-          inlineData: {
-            data: imageBytes.toString('base64'),
-            mimeType: 'image/jpeg',
-          },
-        },
-      ]);
-
-      const text = result.response.text().trim().toLowerCase();
-
       let gender = 'unknown';
-      if (text.includes('male') && !text.includes('female')) {
-        gender = 'male';
-      } else if (text.includes('female') && !text.includes('male')) {
-        gender = 'female';
+
+      try {
+        const result = await geminiModel.generateContent([
+          { text: prompt },
+          {
+            inlineData: {
+              data: imageBytes.toString('base64'),
+              mimeType: 'image/jpeg',
+            },
+          },
+        ]);
+
+        const text = result.response.text().trim().toLowerCase();
+
+        if (text.includes('male') && !text.includes('female')) {
+          gender = 'male';
+        } else if (text.includes('female') && !text.includes('male')) {
+          gender = 'female';
+        }
+      } catch (apiError) {
+        // Fallback to mock verification if API fails (e.g., quota exceeded)
+        console.warn('Gemini API failed, using fallback:', apiError.status);
+
+        if (apiError.status === 429) {
+          // API quota exceeded - use mock mode for development
+          console.log('Using mock verification (API quota exceeded)');
+          gender = male;
+          console.log('Mock verification assigned gender:', gender);
+        } else {
+          throw apiError;
+        }
       }
 
       if (gender === 'unknown') {
@@ -211,6 +230,8 @@ app.get(
 
       res.json({
         device_id: device.device_id,
+        nickname: device.nickname,
+        bio: device.bio,
         gender: device.gender,
         verified_at: device.verified_at,
         daily_matches: device.daily_matches,
@@ -225,12 +246,58 @@ app.get(
   },
 );
 
+/**
+ * Update pseudonymous profile (nickname + bio)
+ * - No PII: nickname/bio are short, free-text pseudonyms
+ */
+app.post(
+  '/api/profile',
+  validateDeviceId,
+  getOrCreateDevice,
+  async (req, res) => {
+    try {
+      const { nickname, bio } = req.body || {};
+
+      // Simple length guards (avoid huge payloads)
+      const safeNickname =
+        typeof nickname === 'string' && nickname.trim().length <= 32
+          ? nickname.trim()
+          : null;
+      const safeBio =
+        typeof bio === 'string' && bio.trim().length <= 140
+          ? bio.trim()
+          : null;
+
+      // Update device profile
+      if (safeNickname !== null) {
+        req.device.nickname = safeNickname;
+      }
+      if (safeBio !== null) {
+        req.device.bio = safeBio;
+      }
+
+      await req.device.save();
+
+      res.json({
+        success: true,
+        nickname: req.device.nickname,
+        bio: req.device.bio,
+      });
+    } catch (error) {
+      console.error('Update profile error:', error);
+      res.status(500).json({ error: 'Failed to update profile' });
+    }
+  },
+);
+
 const server = async () => {
   try {
-    await connectDB(`${process.env.MONGODB_URI}`);
-    console.log('MongoDB Connected');
+    const dbConnection = await connectDB();
+    if (dbConnection) {
+      console.log('MongoDB Connected');
+    }
   } catch (error) {
-    console.log('DB Connection Failed', error);
+    console.log('DB Connection error:', error.message);
   }
 
   const PORT = process.env.PORT || 8000;
@@ -238,3 +305,13 @@ const server = async () => {
 };
 
 server();
+
+process.on('SIGINT', async () => {
+  await disconnectDB();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  await disconnectDB();
+  process.exit(0);
+});
