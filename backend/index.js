@@ -178,7 +178,7 @@ app.post(
         if (apiError.status === 429) {
           // API quota exceeded - use mock mode for development
           console.log('Using mock verification (API quota exceeded)');
-          gender = male;
+          gender = 'male';
           console.log('Mock verification assigned gender:', gender);
         } else {
           throw apiError;
