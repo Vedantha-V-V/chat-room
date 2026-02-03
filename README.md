@@ -71,4 +71,3 @@ npm run dev
 ### Status
 - UI: Matrix-themed onboarding, queue, and chat flows implemented.
 - Backend: Core REST endpoints + device limits in place; Socket.IO wiring planned next.
-- ML: Flask service stubbed with mock classifier; ready to plug in a real model.
