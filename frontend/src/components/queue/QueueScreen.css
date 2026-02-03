@@ -58,13 +58,13 @@
 .filter-btn:hover:not(:disabled) {
   background: var(--matrix-green);
   color: var(--matrix-black);
-  box-shadow: 0 0 15px var(--matrix-green-glow);
+  box-shadow: none;
 }
 
 .filter-btn.active {
   background: var(--matrix-green);
   color: var(--matrix-black);
-  box-shadow: 0 0 15px var(--matrix-green-glow);
+  box-shadow: none;
 }
 
 .filter-btn:disabled {

@@ -67,12 +67,12 @@ const QueueScreen = ({ onMatchFound, userGender }) => {
   return (
     <div className="queue-screen">
       <div className="matrix-card queue-card">
-        <h1 className="matrix-glow">FIND MATCH</h1>
+        <h1>FIND MATCH</h1>
         
         <div className="matrix-terminal mt-3">
           <div>DEVICE_ID: {deviceId}</div>
-          <div className="mt-1">YOUR_GENDER: <span className="matrix-glow-subtle">{userGender?.toUpperCase() || 'UNKNOWN'}</span></div>
-          <div className="mt-2">
+          <div className="mt-1">GENDER: <span className="matrix-glow-subtle">{userGender?.toUpperCase() || 'UNKNOWN'}</span></div>
+          {/* <div className="mt-2">
             DAILY_MATCHES:
             <div className="mt-1" style={{ paddingLeft: '16px', color: 'var(--matrix-text-dim)' }}>
               MALE: {dailyMatches.male}/5
@@ -81,7 +81,7 @@ const QueueScreen = ({ onMatchFound, userGender }) => {
               <br />
               ANY: {dailyMatches.any}/∞
             </div>
-          </div>
+          </div>*/}
         </div>
 
         {!isInQueue ? (

@@ -12,6 +12,17 @@ const DeviceSchema = new mongoose.Schema({
     unique: true,
     index: true,
   },
+  // Gender classification result (from verification)
+  gender: {
+    type: String,
+    enum: ['male', 'female'],
+    default: null,
+  },
+  // When gender was verified
+  verified_at: {
+    type: Date,
+    default: null,
+  },
   // Daily match counts per filter type
   daily_matches: {
     male: { type: Number, default: 0 },

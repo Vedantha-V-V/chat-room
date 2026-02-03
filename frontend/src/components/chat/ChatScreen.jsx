@@ -133,7 +133,7 @@ const ChatScreen = ({ matchId, onDisconnect }) => {
         {/* Privacy Notice */}
         <div className="chat-privacy-notice">
           <div style={{ fontSize: '11px', color: 'var(--matrix-text-dim)' }}>
-            🔒 Messages are ephemeral and never stored in database
+            &copy; {new Date().getFullYear()} Secure and private chat room
           </div>
         </div>
       </div>
