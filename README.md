@@ -46,10 +46,6 @@ Anonymous chat application for Klymo Ascent – built around **privacy**, **ephe
   - Gender verification result endpoint
   - Queue/matching endpoints (stubs ready for Socket.IO integration)
 
-- **ML Service**: Python + Flask
-  - `/classify` endpoint for gender classification
-  - In-memory image handling only (no disk writes / DB storage)
-
 ### Key Privacy Guarantees
 - **No PII**: No email, phone, or real identity collected.
 - **No image storage**: Selfies used only for real-time classification, then discarded.
@@ -71,15 +67,6 @@ cd frontend
 npm install
 npm run dev
 ```
-
-**ML Service**
-```bash
-cd ml-service
-pip install -r requirements.txt
-python main.py
-```
-
-Make sure environment variables (API URLs, MongoDB URI, etc.) are set according to the `.env.example` files.
 
 ### Status
 - UI: Matrix-themed onboarding, queue, and chat flows implemented.
