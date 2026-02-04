@@ -1,73 +1,148 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { io } from 'socket.io-client';
 import { useDeviceId } from '../../hooks/useDeviceId';
 import './QueueScreen.css';
 
+const SOCKET_URL = 'http://localhost:8000';
+
 /**
- * Queue Screen - Join queue with gender filter
- * Matrix-themed queue interface
+ * Queue Screen - Create or join chat rooms
+ * Matrix-themed room selection interface
  */
 const QueueScreen = ({ onMatchFound, userGender, userNickname, userBio }) => {
   const { deviceId } = useDeviceId();
-  const [filter, setFilter] = useState('any');
-  const [isInQueue, setIsInQueue] = useState(false);
-  const [queueTime, setQueueTime] = useState(0);
+  const [rooms, setRooms] = useState([]);
+  const [newRoomName, setNewRoomName] = useState('');
   const [error, setError] = useState(null);
-  const [dailyMatches, setDailyMatches] = useState({ male: 0, female: 0, any: 0 });
+  const [isLoading, setIsLoading] = useState(true);
+  const [isConnected, setIsConnected] = useState(false);
+  const socketRef = useRef(null);
+  const navigatingToChat = useRef(false);
+
+  // Fetch rooms via HTTP API (more reliable for initial load)
+  const fetchRooms = useCallback(async () => {
+    try {
+      const response = await fetch(`${SOCKET_URL}/api/rooms`);
+      const data = await response.json();
+      setRooms(data.rooms || []);
+      setIsLoading(false);
+    } catch (err) {
+      console.error('Failed to fetch rooms:', err);
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let interval;
-    if (isInQueue) {
-      interval = setInterval(() => {
-        setQueueTime((prev) => prev + 1);
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [isInQueue]);
+    // Fetch rooms via HTTP first
+    fetchRooms();
 
-  const handleJoinQueue = async () => {
+    // Connect to socket
+    socketRef.current = io(SOCKET_URL);
+
+    socketRef.current.on('connect', () => {
+      console.log('Connected to server, socket id:', socketRef.current.id);
+      setIsConnected(true);
+      // Also request rooms via socket
+      socketRef.current.emit('get-rooms');
+    });
+
+    socketRef.current.on('disconnect', () => {
+      console.log('Disconnected from server');
+      setIsConnected(false);
+    });
+
+    socketRef.current.on('rooms-updated', (roomList) => {
+      console.log('Received rooms-updated:', roomList);
+      setRooms(roomList);
+      setIsLoading(false);
+    });
+
+    socketRef.current.on('room-created', ({ roomId, roomName }) => {
+      if (onMatchFound) {
+        navigatingToChat.current = true;
+        onMatchFound({
+          matchId: roomId,
+          roomName,
+          socket: socketRef.current,
+          matchedAt: new Date(),
+        });
+      }
+    });
+
+    socketRef.current.on('room-joined', ({ roomId, roomName }) => {
+      if (onMatchFound) {
+        navigatingToChat.current = true;
+        onMatchFound({
+          matchId: roomId,
+          roomName,
+          socket: socketRef.current,
+          matchedAt: new Date(),
+        });
+      }
+    });
+
+    socketRef.current.on('error', ({ message }) => {
+      setError(message);
+    });
+
+    return () => {
+      // Only disconnect if we're not navigating to chat (socket will be reused)
+      if (socketRef.current && !navigatingToChat.current) {
+        socketRef.current.disconnect();
+      }
+    };
+  }, [onMatchFound, fetchRooms]);
+
+  const handleRefresh = () => {
+    setIsLoading(true);
+    fetchRooms();
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('get-rooms');
+    }
+  };
+
+  const handleCreateRoom = () => {
     if (!deviceId) {
       setError('Device ID not available');
       return;
     }
 
-    try {
-      setError(null);
-      setIsInQueue(true);
-      setQueueTime(0);
-
-      // TODO: Connect to Socket.IO and join queue
-      // For now, simulate matching after 3 seconds
-      setTimeout(() => {
-        // Simulate match found
-        if (onMatchFound) {
-          onMatchFound({
-            matchId: 'match_' + Date.now(),
-            matchedAt: new Date(),
-          });
-        }
-      }, 3000);
-    } catch (err) {
-      setError(err.message || 'Failed to join queue');
-      setIsInQueue(false);
+    if (!socketRef.current?.connected) {
+      setError('Not connected to server. Please wait...');
+      return;
     }
+
+    setError(null);
+    socketRef.current.emit('create-room', {
+      roomName: newRoomName || `${userNickname || 'Anonymous'}'s Room`,
+      nickname: userNickname,
+      deviceId,
+    });
   };
 
-  const handleLeaveQueue = () => {
-    setIsInQueue(false);
-    setQueueTime(0);
-    // TODO: Leave queue via Socket.IO
-  };
+  const handleJoinRoom = (roomId) => {
+    if (!deviceId) {
+      setError('Device ID not available');
+      return;
+    }
 
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+    if (!socketRef.current?.connected) {
+      setError('Not connected to server. Please wait...');
+      return;
+    }
+
+    setError(null);
+    socketRef.current.emit('join-room', {
+      roomId,
+      nickname: userNickname,
+      deviceId,
+    });
   };
 
   return (
     <div className="queue-screen">
       <div className="matrix-card queue-card">
-        <h1>FIND MATCH</h1>
+        <h1>CHAT ROOMS</h1>
         
         <div className="matrix-terminal mt-3">
           <div>DEVICE_ID: {deviceId}</div>
@@ -88,82 +163,93 @@ const QueueScreen = ({ onMatchFound, userGender, userNickname, userBio }) => {
               BIO: {userBio}
             </div>
           )}
-          {/* <div className="mt-2">
-            DAILY_MATCHES:
-            <div className="mt-1" style={{ paddingLeft: '16px', color: 'var(--matrix-text-dim)' }}>
-              MALE: {dailyMatches.male}/5
-              <br />
-              FEMALE: {dailyMatches.female}/5
-              <br />
-              ANY: {dailyMatches.any}/∞
-            </div>
-          </div>*/}
         </div>
 
-        {!isInQueue ? (
-          <div className="queue-controls mt-4">
-            <div className="filter-selector">
-              <label className="filter-label">SELECT FILTER:</label>
-              <div className="filter-options">
-                <button
-                  className={`filter-btn ${filter === 'male' ? 'active' : ''}`}
-                  onClick={() => setFilter('male')}
-                  disabled={dailyMatches.male >= 5}
-                >
-                  MALE
-                  {dailyMatches.male >= 5 && <span className="limit-reached"> (LIMIT)</span>}
-                </button>
-                <button
-                  className={`filter-btn ${filter === 'female' ? 'active' : ''}`}
-                  onClick={() => setFilter('female')}
-                  disabled={dailyMatches.female >= 5}
-                >
-                  FEMALE
-                  {dailyMatches.female >= 5 && <span className="limit-reached"> (LIMIT)</span>}
-                </button>
-                <button
-                  className={`filter-btn ${filter === 'any' ? 'active' : ''}`}
-                  onClick={() => setFilter('any')}
-                >
-                  ANY
-                </button>
-              </div>
-            </div>
-
-            {error && (
-              <div className="matrix-status-error mt-2">{error}</div>
-            )}
-
-            <button
-              className="matrix-btn matrix-btn-primary mt-3"
-              onClick={handleJoinQueue}
-              disabled={!filter}
-            >
-              JOIN QUEUE
-            </button>
-          </div>
-        ) : (
-          <div className="queue-waiting mt-4">
-            <div className="matrix-terminal">
-              <div className="matrix-status-online">SEARCHING FOR MATCH...</div>
-              <div className="mt-2">
-                FILTER: <span className="matrix-glow-subtle">{filter.toUpperCase()}</span>
-              </div>
-              <div className="mt-2">
-                TIME: <span className="matrix-glow-subtle">{formatTime(queueTime)}</span>
-              </div>
-              <div className="mt-3 matrix-pulse">
-                <div className="matrix-typing">Scanning network...</div>
-              </div>
-            </div>
-            <button
-              className="matrix-btn mt-3"
-              onClick={handleLeaveQueue}
-            >
-              LEAVE QUEUE
-            </button>
-          </div>
+        {error && (
+          <div className="matrix-status-error mt-2">{error}</div>
         )}
+
+        {/* Create Room Section */}
+        <div className="create-room-section mt-4">
+          <h3 style={{ color: 'var(--matrix-green)', marginBottom: '12px' }}>CREATE NEW ROOM</h3>
+          <div className="create-room-form">
+            <input
+              type="text"
+              className="matrix-input"
+              placeholder="Room name (optional)"
+              value={newRoomName}
+              onChange={(e) => setNewRoomName(e.target.value)}
+              style={{ marginRight: '10px', flex: 1 }}
+            />
+            <button
+              className="matrix-btn matrix-btn-primary"
+              onClick={handleCreateRoom}
+            >
+              CREATE
+            </button>
+          </div>
+        </div>
+
+        {/* Available Rooms Section */}
+        <div className="rooms-section mt-4">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <h3 style={{ color: 'var(--matrix-green)', margin: 0 }}>
+              AVAILABLE ROOMS ({rooms.length})
+            </h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ 
+                fontSize: '12px', 
+                color: isConnected ? 'var(--matrix-green)' : 'var(--matrix-error)',
+                fontFamily: 'var(--font-mono)'
+              }}>
+                {isConnected ? '● CONNECTED' : '○ DISCONNECTED'}
+              </span>
+              <button
+                className="matrix-btn"
+                onClick={handleRefresh}
+                style={{ padding: '6px 12px', fontSize: '12px' }}
+              >
+                REFRESH
+              </button>
+            </div>
+          </div>
+          
+          {isLoading ? (
+            <div className="matrix-terminal">
+              <div className="matrix-typing">Loading rooms...</div>
+            </div>
+          ) : rooms.length === 0 ? (
+            <div className="matrix-terminal">
+              <div style={{ color: 'var(--matrix-text-dim)' }}>
+                No rooms available. Create one to start chatting!
+              </div>
+            </div>
+          ) : (
+            <div className="rooms-list">
+              {rooms.map((room) => (
+                <div key={room.roomId} className="room-item matrix-terminal">
+                  <div className="room-info">
+                    <div className="room-name">{room.name}</div>
+                    <div className="room-meta">
+                      <span className="matrix-status-online">
+                        {room.userCount} user{room.userCount !== 1 ? 's' : ''}
+                      </span>
+                      <span style={{ color: 'var(--matrix-text-dim)', marginLeft: '10px' }}>
+                        Created by {room.createdBy}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    className="matrix-btn"
+                    onClick={() => handleJoinRoom(room.roomId)}
+                  >
+                    JOIN
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

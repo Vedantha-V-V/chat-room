@@ -23,6 +23,7 @@
     "mongodb-memory-server": "^11.0.1",
     "mongoose": "^6.8.2",
     "nodemon": "^3.1.10",
-    "openai": "^3.1.0"
+    "openai": "^3.1.0",
+    "socket.io": "^4.8.3"
   }
 }

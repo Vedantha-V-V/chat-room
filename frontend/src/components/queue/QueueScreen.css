@@ -19,6 +19,67 @@
   letter-spacing: 3px;
 }
 
+/* Create Room Section */
+.create-room-section {
+  text-align: left;
+  padding: 16px;
+  border: 1px solid var(--matrix-green);
+  background: var(--matrix-dark);
+}
+
+.create-room-form {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.create-room-form .matrix-input {
+  flex: 1;
+}
+
+/* Rooms Section */
+.rooms-section {
+  text-align: left;
+}
+
+.rooms-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.room-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  border: 1px solid var(--matrix-green);
+  transition: all 0.3s ease;
+}
+
+.room-item:hover {
+  background: rgba(0, 255, 65, 0.1);
+  box-shadow: 0 0 10px var(--matrix-green-glow);
+}
+
+.room-info {
+  flex: 1;
+}
+
+.room-name {
+  font-size: 16px;
+  color: var(--matrix-green);
+  font-family: var(--font-mono);
+  margin-bottom: 4px;
+}
+
+.room-meta {
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
 .filter-selector {
   margin-bottom: 24px;
 }

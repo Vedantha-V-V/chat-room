@@ -7,53 +7,103 @@ import './ChatScreen.css';
  * Messages never hit DB - ephemeral only
  * Matrix-themed chat interface
  */
-const ChatScreen = ({ matchId, onDisconnect }) => {
+const ChatScreen = ({ matchId, roomName, socket, onDisconnect }) => {
   const { deviceId } = useDeviceId();
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
-  const [isConnected, setIsConnected] = useState(false);
+  const [isConnected, setIsConnected] = useState(socket?.connected || false);
+  const [userCount, setUserCount] = useState(1);
   const messagesEndRef = useRef(null);
-  const socketRef = useRef(null);
+  const nicknameRef = useRef('');
 
   useEffect(() => {
-    // TODO: Initialize Socket.IO connection
-    // For now, simulate connection
-    setIsConnected(true);
+    // Get nickname from localStorage
+    try {
+      const saved = localStorage.getItem('anonymous_chat_user');
+      if (saved) {
+        const data = JSON.parse(saved);
+        nicknameRef.current = data.nickname || 'Anonymous';
+      }
+    } catch (e) {
+      nicknameRef.current = 'Anonymous';
+    }
+  }, []);
 
+  useEffect(() => {
+    if (!socket) {
+      console.log('No socket provided to ChatScreen');
+      return;
+    }
+
+    console.log('ChatScreen socket connected:', socket.connected, 'id:', socket.id);
+    setIsConnected(socket.connected);
+
+    socket.on('connect', () => {
+      console.log('Socket reconnected');
+      setIsConnected(true);
+    });
+
+    socket.on('disconnect', () => {
+      setIsConnected(false);
+    });
+
+    socket.on('new-message', (message) => {
+      setMessages((prev) => [...prev, {
+        ...message,
+        sender: message.senderId === socket.id ? 'you' : message.sender,
+      }]);
+    });
+
+    socket.on('user-joined', ({ nickname, userCount }) => {
+      setUserCount(userCount);
+      setMessages((prev) => [...prev, {
+        id: Date.now(),
+        text: `${nickname} joined the room`,
+        sender: 'system',
+        timestamp: new Date(),
+      }]);
+    });
+
+    socket.on('user-left', ({ nickname, userCount }) => {
+      setUserCount(userCount);
+      setMessages((prev) => [...prev, {
+        id: Date.now(),
+        text: `${nickname} left the room`,
+        sender: 'system',
+        timestamp: new Date(),
+      }]);
+    });
+
+    return () => {
+      socket.off('connect');
+      socket.off('disconnect');
+      socket.off('new-message');
+      socket.off('user-joined');
+      socket.off('user-left');
+    };
+  }, [socket]);
+
+  useEffect(() => {
     // Scroll to bottom when new messages arrive
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  useEffect(() => {
-    return () => {
-      // Cleanup on unmount
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-      }
-    };
-  }, []);
-
   const handleSendMessage = (e) => {
     e.preventDefault();
-    if (!inputMessage.trim() || !isConnected) return;
+    if (!inputMessage.trim() || !isConnected || !socket) return;
 
-    const newMessage = {
-      id: Date.now(),
-      text: inputMessage,
-      sender: 'you',
-      timestamp: new Date(),
-    };
+    socket.emit('send-message', {
+      roomId: matchId,
+      message: inputMessage,
+      nickname: nicknameRef.current,
+    });
 
-    setMessages((prev) => [...prev, newMessage]);
     setInputMessage('');
-
-    // TODO: Send via Socket.IO
-    // socketRef.current.emit('message', { matchId, text: inputMessage });
   };
 
   const handleDisconnect = () => {
-    if (socketRef.current) {
-      socketRef.current.disconnect();
+    if (socket) {
+      socket.emit('leave-room');
     }
     if (onDisconnect) {
       onDisconnect();
@@ -76,13 +126,16 @@ const ChatScreen = ({ matchId, onDisconnect }) => {
             <div className="matrix-status-online">
               {isConnected ? 'CONNECTED' : 'DISCONNECTED'}
             </div>
-            <div className="chat-match-id">MATCH_ID: {matchId}</div>
+            <div className="chat-match-id">ROOM: {roomName || matchId}</div>
+            <div style={{ fontSize: '12px', color: 'var(--matrix-text-dim)' }}>
+              Users in room: {userCount}
+            </div>
           </div>
           <button
             className="matrix-btn chat-disconnect-btn"
             onClick={handleDisconnect}
           >
-            DISCONNECT
+            LEAVE ROOM
           </button>
         </div>
 
@@ -99,12 +152,25 @@ const ChatScreen = ({ matchId, onDisconnect }) => {
             messages.map((msg) => (
               <div
                 key={msg.id}
-                className={`chat-message ${msg.sender === 'you' ? 'message-sent' : 'message-received'}`}
+                className={`chat-message ${
+                  msg.sender === 'system' 
+                    ? 'message-system' 
+                    : msg.sender === 'you' 
+                      ? 'message-sent' 
+                      : 'message-received'
+                }`}
               >
-                <div className="message-content">
-                  <div className="message-text">{msg.text}</div>
-                  <div className="message-time">{formatTime(msg.timestamp)}</div>
-                </div>
+                {msg.sender === 'system' ? (
+                  <div className="message-system-text">{msg.text}</div>
+                ) : (
+                  <div className="message-content">
+                    {msg.sender !== 'you' && (
+                      <div className="message-sender">{msg.sender}</div>
+                    )}
+                    <div className="message-text">{msg.text}</div>
+                    <div className="message-time">{formatTime(msg.timestamp)}</div>
+                  </div>
+                )}
               </div>
             ))
           )}

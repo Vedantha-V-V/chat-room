@@ -51,6 +51,10 @@ function App() {
   };
 
   const handleChatDisconnect = () => {
+    // Disconnect socket when leaving chat
+    if (currentMatch?.socket) {
+      currentMatch.socket.disconnect();
+    }
     setCurrentMatch(null);
     setAppState('queue');
   };
@@ -75,6 +79,8 @@ function App() {
       {appState === 'chat' && currentMatch && (
         <ChatScreen
           matchId={currentMatch.matchId}
+          roomName={currentMatch.roomName}
+          socket={currentMatch.socket}
           onDisconnect={handleChatDisconnect}
         />
       )}

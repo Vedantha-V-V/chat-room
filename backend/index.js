@@ -2,6 +2,8 @@ import express from 'express';
 import * as dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import cors from 'cors';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // Suppress Mongoose strictQuery deprecation warning - set BEFORE any db operations
@@ -22,6 +24,17 @@ import {
 dotenv.config();
 
 const app = express();
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST'],
+  },
+});
+
+// Room management
+const rooms = new Map(); // roomId -> { name, users: Map<socketId, userData>, createdAt, createdBy }
+
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
@@ -38,6 +51,21 @@ if (GEMINI_API_KEY && GEMINI_API_KEY !== 'YOUR_GEMINI_API_KEY_HERE') {
 // Health/root endpoint
 app.get('/', async (req, res) => {
   res.send('Backend server is running');
+});
+
+// Get list of available rooms
+app.get('/api/rooms', (req, res) => {
+  const roomList = [];
+  rooms.forEach((room, roomId) => {
+    roomList.push({
+      roomId,
+      name: room.name,
+      userCount: room.users.size,
+      createdAt: room.createdAt,
+      createdBy: room.createdBy,
+    });
+  });
+  res.json({ rooms: roomList });
 });
 
 // Apply general rate limiting to all API routes (10 req/min per device)
@@ -172,7 +200,7 @@ app.post(
           gender = 'female';
         }
       } catch (apiError) {
-        // Fallback to mock verification if API fails (e.g., quota exceeded)
+        // Fallback to mock verification if API fails
         console.warn('Gemini API failed, using fallback:', apiError.status);
 
         if (apiError.status === 429) {
@@ -290,6 +318,145 @@ app.post(
   },
 );
 
+// Socket.IO connection handling
+io.on('connection', (socket) => {
+  console.log('User connected:', socket.id);
+
+  // Create a new room
+  socket.on('create-room', ({ roomName, nickname, deviceId }) => {
+    const roomId = 'room_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    
+    rooms.set(roomId, {
+      name: roomName || `Room ${rooms.size + 1}`,
+      users: new Map([[socket.id, { nickname, deviceId }]]),
+      createdAt: new Date(),
+      createdBy: nickname || 'Anonymous',
+    });
+
+    socket.join(roomId);
+    socket.roomId = roomId;
+
+    socket.emit('room-created', { roomId, roomName: rooms.get(roomId).name });
+    
+    // Broadcast updated room list to all connected clients
+    io.emit('rooms-updated', getRoomList());
+  });
+
+  // Join an existing room
+  socket.on('join-room', ({ roomId, nickname, deviceId }) => {
+    const room = rooms.get(roomId);
+    
+    if (!room) {
+      socket.emit('error', { message: 'Room not found' });
+      return;
+    }
+
+    // Clear emptyAt flag since someone joined
+    delete room.emptyAt;
+    
+    room.users.set(socket.id, { nickname, deviceId });
+    socket.join(roomId);
+    socket.roomId = roomId;
+
+    socket.emit('room-joined', { 
+      roomId, 
+      roomName: room.name,
+      users: Array.from(room.users.values()).map(u => u.nickname || 'Anonymous')
+    });
+
+    // Notify others in the room
+    socket.to(roomId).emit('user-joined', { 
+      nickname: nickname || 'Anonymous',
+      userCount: room.users.size
+    });
+
+    // Broadcast updated room list
+    io.emit('rooms-updated', getRoomList());
+  });
+
+  // Send message in room
+  socket.on('send-message', ({ roomId, message, nickname }) => {
+    const room = rooms.get(roomId);
+    if (!room) return;
+
+    io.to(roomId).emit('new-message', {
+      id: Date.now(),
+      text: message,
+      sender: nickname || 'Anonymous',
+      senderId: socket.id,
+      timestamp: new Date(),
+    });
+  });
+
+  // Leave room
+  socket.on('leave-room', () => {
+    handleLeaveRoom(socket);
+  });
+
+  // Get current room list
+  socket.on('get-rooms', () => {
+    socket.emit('rooms-updated', getRoomList());
+  });
+
+  // Handle disconnect
+  socket.on('disconnect', () => {
+    console.log('User disconnected:', socket.id);
+    handleLeaveRoom(socket);
+  });
+});
+
+function handleLeaveRoom(socket) {
+  const roomId = socket.roomId;
+  if (!roomId) return;
+
+  const room = rooms.get(roomId);
+  if (!room) return;
+
+  const user = room.users.get(socket.id);
+  room.users.delete(socket.id);
+
+  // Notify others in the room
+  socket.to(roomId).emit('user-left', {
+    nickname: user?.nickname || 'Anonymous',
+    userCount: room.users.size
+  });
+
+  // Keep room alive for 5 minutes even when empty so others can join
+  // Only delete if room has been empty for a while
+  if (room.users.size === 0) {
+    room.emptyAt = Date.now();
+    // Schedule room deletion after 5 minutes if still empty
+    setTimeout(() => {
+      const currentRoom = rooms.get(roomId);
+      if (currentRoom && currentRoom.users.size === 0 && currentRoom.emptyAt) {
+        rooms.delete(roomId);
+        io.emit('rooms-updated', getRoomList());
+        console.log('Deleted empty room:', roomId);
+      }
+    }, 5 * 60 * 1000); // 5 minutes
+  }
+
+  socket.leave(roomId);
+  socket.roomId = null;
+
+  // Broadcast updated room list
+  io.emit('rooms-updated', getRoomList());
+}
+
+function getRoomList() {
+  const roomList = [];
+  rooms.forEach((room, roomId) => {
+    roomList.push({
+      roomId,
+      name: room.name,
+      userCount: room.users.size,
+      createdAt: room.createdAt,
+      createdBy: room.createdBy,
+    });
+  });
+  return roomList;
+}
+
 const server = async () => {
   try {
     const dbConnection = await connectDB();
@@ -301,7 +468,7 @@ const server = async () => {
   }
 
   const PORT = process.env.PORT || 8000;
-  app.listen(PORT, () => console.log(`App is running at PORT:${PORT}`));
+  httpServer.listen(PORT, () => console.log(`App is running at PORT:${PORT}`));
 };
 
 server();
